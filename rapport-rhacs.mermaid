@@ -1,0 +1,64 @@
+flowchart TB
+
+    subgraph CONFIG["Report Configuration"]
+        direction TB
+        P1["Report name + description"]
+        P2["CVE severity\nCritical / Important / Moderate / Low"]
+        P3["CVE status\nFixable / Unfixable"]
+        P4["Image type\nDeployed images / Watched images"]
+        P5["CVEs discovered since\nAll time / Last scheduled / Custom date"]
+    end
+
+    subgraph SCOPE["Portée"]
+        C1["Collection\n(regles cluster / namespace / deployment,\nnoms ou regex)"]
+    end
+
+    subgraph EXEC["Exécution"]
+        direction TB
+        J1["Report job planifié\n(schedule hebdo / quotidien)"]
+        J2["Run on demand\n(Send report now / Generate download)"]
+    end
+
+    subgraph OUTPUT["Sortie CSV (1 ligne = 1 finding)"]
+        direction TB
+        COL["Colonnes :\nCluster | Namespace | Deployment\nImage | Component | CVE\nFixable | CVE Fixed In Version\nSeverity | CVSS | Discovered Date | Reference"]
+        EXTRA["4.6+ optionnel :\nNVD CVSS | EPSS probability"]
+    end
+
+    subgraph DELIVERY["Distribution"]
+        D1["Email notifier\n(piece jointe .zip/.csv)"]
+        D2["Téléchargement portail\n(Vulnerability Reporting > jobs)"]
+        D3["API v2\n/v2/reports/configurations\n+ run + download"]
+    end
+
+    CONFIG --> SCOPE
+    SCOPE --> EXEC
+    J1 --> OUTPUT
+    J2 --> OUTPUT
+    OUTPUT --> D1
+    OUTPUT --> D2
+    OUTPUT --> D3
+
+    subgraph MODEL["Correspondance modèle de données"]
+        direction TB
+        M1["Cluster.name"]
+        M2["Namespace.name"]
+        M3["Deployment.name"]
+        M4["Image.name.fullName\n(digest en interne)"]
+        M5["ImageComponent.name + version"]
+        M6["ImageCVE.cve, severity, cvss,\nfixedBy, firstImageOccurrence"]
+    end
+
+    COL -.-> M1
+    COL -.-> M2
+    COL -.-> M3
+    COL -.-> M4
+    COL -.-> M5
+    COL -.-> M6
+
+    style CONFIG fill:#dbe4ff,stroke:#4a6fd4
+    style SCOPE fill:#e5dbff,stroke:#8b5cf6
+    style EXEC fill:#fff3bf,stroke:#f59e0b
+    style OUTPUT fill:#d3f9d8,stroke:#22c55e
+    style DELIVERY fill:#ffd8a8,stroke:#f59e0b
+    style MODEL fill:#c3fae8,stroke:#0d9488

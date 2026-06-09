@@ -1,0 +1,147 @@
+erDiagram
+    CLUSTER ||--o{ NODE : "heberge"
+    CLUSTER ||--o{ NAMESPACE : "contient"
+    NAMESPACE ||--o{ DEPLOYMENT : "contient"
+    DEPLOYMENT ||--o{ POD : "instancie"
+    DEPLOYMENT ||--|{ CONTAINER : "definit"
+    CONTAINER }o--|| IMAGE : "reference (digest)"
+    IMAGE ||--o{ IMAGE_COMPONENT : "compose"
+    IMAGE_COMPONENT }o--o{ IMAGE_CVE : "affecte par"
+    NODE ||--o{ NODE_COMPONENT : "compose"
+    NODE_COMPONENT }o--o{ NODE_CVE : "affecte par"
+    POLICY ||--o{ ALERT : "declenche"
+    DEPLOYMENT ||--o{ ALERT : "concerne"
+
+    CLUSTER {
+        uuid id PK
+        string name
+        enum type "K8S / OPENSHIFT4 / GENERIC"
+        map labels
+        string orchestratorVersion
+        enum sensorHealthStatus
+        timestamp lastContact
+    }
+
+    NODE {
+        uuid id PK
+        string name
+        uuid clusterId FK
+        string-array internalIpAddresses
+        string-array externalIpAddresses
+        enum containerRuntimeType "DOCKER / CRIO / CONTAINERD"
+        string kernelVersion
+        string osImage "ex RHCOS"
+        string kubeletVersion
+        timestamp scanTime
+        float riskScore
+        float topCvss
+    }
+
+    NODE_COMPONENT {
+        string name PK "cle composite name+version+os"
+        string version PK
+        float topCvss
+    }
+
+    NODE_CVE {
+        string cve PK "cle composite cve+os"
+        float cvss
+        enum severity "LOW / MODERATE / IMPORTANT / CRITICAL"
+        string fixedBy "vide = non fixable"
+        bool snoozed
+    }
+
+    NAMESPACE {
+        uuid id PK
+        string name
+        uuid clusterId FK
+        map labels
+        timestamp creationTime
+    }
+
+    DEPLOYMENT {
+        uuid id PK "UID K8s - recree au redeploiement"
+        string name
+        string type "Deployment / DaemonSet / StatefulSet"
+        uuid namespaceId FK
+        uuid clusterId FK
+        int replicas
+        string serviceAccount
+        enum saPermissionLevel
+        bool hostNetwork
+        bool hostPid
+        array ports "exposure INTERNAL/NODE/EXTERNAL/HOST"
+        float riskScore
+        bool inactive
+    }
+
+    POD {
+        uuid id PK
+        string name
+        uuid deploymentId FK
+        timestamp started
+        array liveInstances
+    }
+
+    CONTAINER {
+        string id PK "deploymentId:containerName"
+        string name
+        string imageId FK "digest sha256"
+        object securityContext "privileged, capabilities"
+        object resources
+        array volumes
+        array secrets
+    }
+
+    IMAGE {
+        string id PK "sha256-digest - cle de dedup"
+        string fullName "registry/remote:tag"
+        string-array names "toutes les refs du digest"
+        timestamp created
+        timestamp scanTime
+        string operatingSystem
+        int cves "denormalise"
+        int fixableCves "denormalise"
+        float topCvss
+        float riskScore
+        bool notPullable
+    }
+
+    IMAGE_COMPONENT {
+        string name PK "cle composite name+version+os"
+        string version PK
+        enum source "OS / PYTHON / JAVA / NODEJS / GO"
+        string location "chemin dans l image"
+        int layerIndex "couche Dockerfile"
+        string fixedBy
+    }
+
+    IMAGE_CVE {
+        string cve PK "cle composite cve+os"
+        float cvss
+        enum scoreVersion "V2 / V3"
+        float epssProbability "Scanner V4 - 4.5+"
+        enum severity
+        string fixedBy "vide = non fixable"
+        enum state "OBSERVED / DEFERRED / FALSE_POSITIVE"
+        timestamp firstImageOccurrence
+    }
+
+    POLICY {
+        uuid id PK
+        string name
+        enum severity
+        enum-array lifecycleStages "BUILD / DEPLOY / RUNTIME"
+        array enforcementActions
+        bool disabled
+    }
+
+    ALERT {
+        uuid id PK
+        object policy "copie embarquee"
+        uuid deploymentId FK
+        enum lifecycleStage
+        enum state "ACTIVE / RESOLVED / ATTEMPTED"
+        array violations
+        timestamp firstOccurred
+    }
