@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1112" viewBox="0 0 1760 1112" font-family="Inter, Geist, Segoe UI, system-ui, sans-serif">
+<rect width="1760" height="1112" fill="#0E0F12"/>
+<defs>
+<marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#8B919B"/></marker>
+<marker id="arrc" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#FF7A45"/></marker>
+<marker id="arrv" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#F2545B"/></marker>
+<marker id="arrk" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2DD4BF"/></marker>
+</defs>
+<text x="40" y="42" font-size="25" font-weight="800" fill="#ECECEC">Qualys Container Security — Modèle de données</text>
+<text x="40" y="63" font-size="13" fill="#8B919B">API <tspan fill="#FF7A45">/csapi/v1.3/</tspan> · objets JSON Image / Container / Vulnerability(QID) / Sensor / Registry / Pod</text>
+<rect x="30" y="80" width="300" height="870" rx="12" fill="#5B6573" fill-opacity="0.05" stroke="#5B6573" stroke-opacity="0.30"/>
+<text x="44" y="102" font-size="12.5" font-weight="700" fill="#5B6573" letter-spacing="1.1">COLLECTE — SENSORS &amp; REGISTRES</text>
+<rect x="346" y="80" width="690" height="600" rx="12" fill="#FF7A45" fill-opacity="0.05" stroke="#FF7A45" stroke-opacity="0.30"/>
+<text x="360" y="102" font-size="12.5" font-weight="700" fill="#FF7A45" letter-spacing="1.1">INVENTAIRE — IMAGES / CONTENEURS</text>
+<rect x="1050" y="80" width="690" height="600" rx="12" fill="#E0A53B" fill-opacity="0.05" stroke="#E0A53B" stroke-opacity="0.30"/>
+<text x="1064" y="102" font-size="12.5" font-weight="700" fill="#E0A53B" letter-spacing="1.1">VULNÉRABILITÉS &amp; SCORING</text>
+<rect x="346" y="700" width="1010" height="250" rx="12" fill="#2DD4BF" fill-opacity="0.05" stroke="#2DD4BF" stroke-opacity="0.30"/>
+<text x="360" y="722" font-size="12.5" font-weight="700" fill="#2DD4BF" letter-spacing="1.1">KUBERNETES — CLUSTER SENSOR</text>
+<rect x="50" y="120" width="262" height="154" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M50,150 L50,129 Q50,120 59,120 L303,120 Q312,120 312,129 L312,150 Z" fill="#5B6573"/>
+<text x="62" y="140" font-size="13.5" font-weight="700" fill="#0E0F12">Sensor</text>
+<circle cx="65" cy="161" r="3.2" fill="#5B6573"/>
+<text x="76" y="165" font-size="11.5" fill="#FFE3D6">sensorId / uuid</text>
+<text x="62" y="184" font-size="11.5" fill="#8B919B">name · hostname · ipAddress</text>
+<text x="62" y="203" font-size="11.5" fill="#ECECEC">type: GENERAL|REGISTRY|CICD</text>
+<text x="62" y="222" font-size="11.5" fill="#8B919B">    |CLUSTER|ADMISSION|RUNTIME</text>
+<text x="62" y="241" font-size="11.5" fill="#8B919B">version · status</text>
+<text x="62" y="260" font-size="11.5" fill="#8B919B">ec2InstanceId · cloudProvider</text>
+<rect x="50" y="430" width="262" height="116" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M50,460 L50,439 Q50,430 59,430 L303,430 Q312,430 312,439 L312,460 Z" fill="#5B6573"/>
+<text x="62" y="450" font-size="13.5" font-weight="700" fill="#0E0F12">Registry</text>
+<circle cx="65" cy="471" r="3.2" fill="#5B6573"/>
+<text x="76" y="475" font-size="11.5" fill="#FFE3D6">registryUuid</text>
+<text x="62" y="494" font-size="11.5" fill="#ECECEC">registry  (URL)</text>
+<text x="62" y="513" font-size="11.5" fill="#8B919B">type: ECR|ACR|GCR|Quay|Harbor</text>
+<text x="62" y="532" font-size="11.5" fill="#8B919B">connectorState · schedules</text>
+<rect x="50" y="700" width="262" height="116" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M50,730 L50,709 Q50,700 59,700 L303,700 Q312,700 312,709 L312,730 Z" fill="#5B6573"/>
+<text x="62" y="720" font-size="13.5" font-weight="700" fill="#0E0F12">Host</text>
+<circle cx="65" cy="741" r="3.2" fill="#5B6573"/>
+<text x="76" y="745" font-size="11.5" fill="#FFE3D6">uuid</text>
+<text x="62" y="764" font-size="11.5" fill="#ECECEC">hostname · ipAddress</text>
+<text x="62" y="783" font-size="11" fill="#8B919B">◇</text>
+<text x="76" y="783" font-size="11.5" fill="#8B919B">sensorUuid</text>
+<text x="62" y="802" font-size="11.5" fill="#8B919B">lastUpdated</text>
+<rect x="372" y="118" width="300" height="268" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M372,148 L372,127 Q372,118 381,118 L663,118 Q672,118 672,127 L672,148 Z" fill="#FF7A45"/>
+<text x="384" y="138" font-size="13.5" font-weight="700" fill="#0E0F12">Image</text>
+<circle cx="387" cy="159" r="3.2" fill="#FF7A45"/>
+<text x="398" y="163" font-size="11.5" fill="#FFE3D6">sha</text>
+<text x="384" y="182" font-size="11.5" fill="#8B919B">imageId  (court)</text>
+<text x="384" y="201" font-size="11.5" fill="#ECECEC">repo[] {registry,repository,tag}</text>
+<text x="384" y="220" font-size="11.5" fill="#ECECEC">repoDigests[] {digest}</text>
+<text x="384" y="239" font-size="11.5" fill="#8B919B">operatingSystem · architecture</text>
+<text x="384" y="258" font-size="11.5" fill="#8B919B">size · author · dockerVersion</text>
+<text x="384" y="277" font-size="11" fill="#8B919B">◇</text>
+<text x="398" y="277" font-size="11.5" fill="#8B919B">registryUuid</text>
+<text x="384" y="296" font-size="11.5" fill="#8B919B">source[] GENERAL|REGISTRY|CICD</text>
+<text x="384" y="315" font-size="11.5" fill="#8B919B">scanType · scanStatus</text>
+<text x="384" y="334" font-size="11.5" fill="#ECECEC">criticality · riskScore · maxQds</text>
+<text x="384" y="353" font-size="11.5" fill="#ECECEC">vulnerabilities{sev1..5Count}</text>
+<text x="384" y="372" font-size="11.5" fill="#8B919B">isInstrumented · baseImage</text>
+<rect x="710" y="118" width="300" height="230" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M710,148 L710,127 Q710,118 719,118 L1001,118 Q1010,118 1010,127 L1010,148 Z" fill="#FF7A45"/>
+<text x="722" y="138" font-size="13.5" font-weight="700" fill="#0E0F12">Container</text>
+<circle cx="725" cy="159" r="3.2" fill="#FF7A45"/>
+<text x="736" y="163" font-size="11.5" fill="#FFE3D6">sha</text>
+<text x="722" y="182" font-size="11.5" fill="#8B919B">containerId  (court)</text>
+<text x="722" y="201" font-size="11.5" fill="#ECECEC">name · state RUNNING|STOPPED</text>
+<text x="722" y="220" font-size="11" fill="#8B919B">◇</text>
+<text x="736" y="220" font-size="11.5" fill="#8B919B">imageSha</text>
+<text x="722" y="239" font-size="11" fill="#8B919B">◇</text>
+<text x="736" y="239" font-size="11.5" fill="#8B919B">imageUuid</text>
+<text x="722" y="258" font-size="11" fill="#8B919B">◇</text>
+<text x="736" y="258" font-size="11.5" fill="#8B919B">host{sensorUuid,…}</text>
+<text x="722" y="277" font-size="11.5" fill="#8B919B">isDrift · isRoot · privileged</text>
+<text x="722" y="296" font-size="11.5" fill="#ECECEC">label[] {k:v}  pod.name/namespace</text>
+<text x="722" y="315" font-size="11.5" fill="#8B919B">cluster{} · source</text>
+<text x="722" y="334" font-size="11.5" fill="#8B919B">ipv4 · macAddress · portMapping</text>
+<rect x="372" y="470" width="300" height="97" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M372,500 L372,479 Q372,470 381,470 L663,470 Q672,470 672,479 L672,500 Z" fill="#FF7A45"/>
+<text x="384" y="490" font-size="13.5" font-weight="700" fill="#0E0F12">Layer</text>
+<circle cx="387" cy="511" r="3.2" fill="#FF7A45"/>
+<text x="398" y="515" font-size="11.5" fill="#FFE3D6">sha / layerSha</text>
+<text x="384" y="534" font-size="11.5" fill="#8B919B">size · createdBy</text>
+<text x="384" y="553" font-size="11.5" fill="#8B919B">created</text>
+<rect x="710" y="460" width="300" height="154" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M710,490 L710,469 Q710,460 719,460 L1001,460 Q1010,460 1010,469 L1010,490 Z" fill="#FF7A45"/>
+<text x="722" y="480" font-size="13.5" font-weight="700" fill="#0E0F12">Software / Package</text>
+<circle cx="725" cy="501" r="3.2" fill="#FF7A45"/>
+<text x="736" y="505" font-size="11.5" fill="#FFE3D6">name · version</text>
+<text x="722" y="524" font-size="11.5" fill="#ECECEC">scanType STATIC|DYNAMIC|SCA</text>
+<text x="722" y="543" font-size="11.5" fill="#8B919B">packagePath · type MAPPED</text>
+<text x="722" y="562" font-size="11.5" fill="#ECECEC">fixVersion</text>
+<text x="722" y="581" font-size="11" fill="#8B919B">◇</text>
+<text x="736" y="581" font-size="11.5" fill="#8B919B">layerSha</text>
+<text x="722" y="600" font-size="11.5" fill="#8B919B">lifecycle{stage,eol,eos,ga}</text>
+<rect x="1072" y="118" width="312" height="249" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M1072,148 L1072,127 Q1072,118 1081,118 L1375,118 Q1384,118 1384,127 L1384,148 Z" fill="#F2545B"/>
+<text x="1084" y="138" font-size="13.5" font-weight="700" fill="#0E0F12">Vulnerability  (QID)</text>
+<circle cx="1087" cy="159" r="3.2" fill="#F2545B"/>
+<text x="1098" y="163" font-size="11.5" fill="#FFE3D6">qid</text>
+<text x="1084" y="182" font-size="11.5" fill="#ECECEC">title · category</text>
+<text x="1084" y="201" font-size="11.5" fill="#ECECEC">cveids[]   (1 QID → N CVE)</text>
+<text x="1084" y="220" font-size="11.5" fill="#ECECEC">severity 1–5 · customerSeverity</text>
+<text x="1084" y="239" font-size="11.5" fill="#ECECEC">risk · typeDetected CONFIRMED</text>
+<text x="1084" y="258" font-size="11.5" fill="#8B919B">cvssInfo{baseScore,accessVector}</text>
+<text x="1084" y="277" font-size="11.5" fill="#8B919B">cvss3Info{baseScore,temporal}</text>
+<text x="1084" y="296" font-size="11.5" fill="#8B919B">patchAvailable · published</text>
+<text x="1084" y="315" font-size="11.5" fill="#8B919B">firstFound · lastFound</text>
+<text x="1084" y="334" font-size="11" fill="#8B919B">◇</text>
+<text x="1098" y="334" font-size="11.5" fill="#8B919B">isExempted · layerSha</text>
+<text x="1084" y="353" font-size="11.5" fill="#8B919B">result (Package/Installed/Req.)</text>
+<rect x="1430" y="118" width="282" height="173" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M1430,148 L1430,127 Q1430,118 1439,118 L1703,118 Q1712,118 1712,127 L1712,148 Z" fill="#E0A53B"/>
+<text x="1442" y="138" font-size="13.5" font-weight="700" fill="#0E0F12">threatIntel  (RTI)</text>
+<text x="1442" y="163" font-size="11.5" fill="#ECECEC">activeAttacks · zeroDay</text>
+<text x="1442" y="182" font-size="11.5" fill="#ECECEC">publicExploit · easyExploit</text>
+<text x="1442" y="201" font-size="11.5" fill="#ECECEC">exploitKit · malware</text>
+<text x="1442" y="220" font-size="11.5" fill="#ECECEC">denialOfService · ransomware</text>
+<text x="1442" y="239" font-size="11.5" fill="#8B919B">highLateralMovement</text>
+<text x="1442" y="258" font-size="11.5" fill="#8B919B">highDataLoss · noPatch</text>
+<text x="1442" y="277" font-size="11.5" fill="#8B919B">…Names[] (exploit/malware)</text>
+<rect x="1430" y="400" width="282" height="116" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M1430,430 L1430,409 Q1430,400 1439,400 L1703,400 Q1712,400 1712,409 L1712,430 Z" fill="#E0A53B"/>
+<text x="1442" y="420" font-size="13.5" font-weight="700" fill="#0E0F12">vendorData / RHSA</text>
+<text x="1442" y="445" font-size="11.5" fill="#ECECEC">rhsa.id · rhsa.severity</text>
+<text x="1442" y="464" font-size="11.5" fill="#ECECEC">cve[] {id, severity,</text>
+<text x="1442" y="483" font-size="11.5" fill="#ECECEC">   cvss2.baseScore,</text>
+<text x="1442" y="502" font-size="11.5" fill="#ECECEC">   cvss3.baseScore}</text>
+<rect x="1072" y="460" width="312" height="116" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M1072,490 L1072,469 Q1072,460 1081,460 L1375,460 Q1384,460 1384,469 L1384,490 Z" fill="#E0A53B"/>
+<text x="1084" y="480" font-size="13.5" font-weight="700" fill="#0E0F12">QDS / TruRisk</text>
+<circle cx="1087" cy="501" r="3.2" fill="#E0A53B"/>
+<text x="1098" y="505" font-size="11.5" fill="#FFE3D6">qdsScore  (0–100)</text>
+<text x="1084" y="524" font-size="11.5" fill="#ECECEC">qdsSeverity</text>
+<text x="1084" y="543" font-size="11.5" fill="#ECECEC">riskScore · maxQdsScore</text>
+<text x="1084" y="562" font-size="11.5" fill="#8B919B">formulaUsed</text>
+<rect x="372" y="790" width="290" height="97" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M372,820 L372,799 Q372,790 381,790 L653,790 Q662,790 662,799 L662,820 Z" fill="#2DD4BF"/>
+<text x="384" y="810" font-size="13.5" font-weight="700" fill="#0E0F12">Namespace</text>
+<circle cx="387" cy="831" r="3.2" fill="#2DD4BF"/>
+<text x="398" y="835" font-size="11.5" fill="#FFE3D6">name</text>
+<text x="384" y="854" font-size="11.5" fill="#ECECEC">labels{} · annotations{}</text>
+<text x="384" y="873" font-size="11" fill="#8B919B">◇</text>
+<text x="398" y="873" font-size="11.5" fill="#8B919B">clusterUid</text>
+<rect x="700" y="770" width="300" height="135" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M700,800 L700,779 Q700,770 709,770 L991,770 Q1000,770 1000,779 L1000,800 Z" fill="#2DD4BF"/>
+<text x="712" y="790" font-size="13.5" font-weight="700" fill="#0E0F12">Pod  (Cluster Sensor)</text>
+<circle cx="715" cy="811" r="3.2" fill="#2DD4BF"/>
+<text x="726" y="815" font-size="11.5" fill="#FFE3D6">uuid</text>
+<text x="712" y="834" font-size="11.5" fill="#ECECEC">name · namespace</text>
+<text x="712" y="853" font-size="11" fill="#8B919B">◇</text>
+<text x="726" y="853" font-size="11.5" fill="#8B919B">clusterUid</text>
+<text x="712" y="872" font-size="11" fill="#8B919B">◇</text>
+<text x="726" y="872" font-size="11.5" fill="#8B919B">containersSha[]</text>
+<text x="712" y="891" font-size="11.5" fill="#8B919B">status · startedAt · sensorUuid</text>
+<rect x="1040" y="790" width="290" height="97" rx="9" fill="#1B1E24" stroke="#2A2E36"/>
+<path d="M1040,820 L1040,799 Q1040,790 1049,790 L1321,790 Q1330,790 1330,799 L1330,820 Z" fill="#2DD4BF"/>
+<text x="1052" y="810" font-size="13.5" font-weight="700" fill="#0E0F12">Cluster  (k8s attrs)</text>
+<circle cx="1055" cy="831" r="3.2" fill="#2DD4BF"/>
+<text x="1066" y="835" font-size="11.5" fill="#FFE3D6">uid</text>
+<text x="1052" y="854" font-size="11.5" fill="#ECECEC">type · version</text>
+<text x="1052" y="873" font-size="11.5" fill="#8B919B">name</text>
+<path d="M312,197.0 L372,193.04000000000002" fill="none" stroke="#8B919B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="325.0" y="186.02" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="342.0" y="197.02" font-size="10.5" font-weight="700" fill="#8B919B" text-anchor="middle">scanne 1:N</text>
+<path d="M312,488.0 L346,455 L372,372" fill="none" stroke="#8B919B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="341" y="409" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="358" y="420" font-size="10.5" font-weight="700" fill="#8B919B" text-anchor="middle">1:N</text>
+<path d="M181.0,274 L181.0,700" fill="none" stroke="#8B919B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="164.0" y="478.0" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="181.0" y="489.0" font-size="10.5" font-weight="700" fill="#8B919B" text-anchor="middle">1:1</text>
+<path d="M672,252.0 L710,233.0" fill="none" stroke="#FF7A45" stroke-width="1.6" marker-end="url(#arrc)"/>
+<rect x="663" y="161" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="680" y="172" font-size="10.5" font-weight="700" fill="#FF7A45" text-anchor="middle">1:N</text>
+<path d="M522.0,386 L522.0,470" fill="none" stroke="#FF7A45" stroke-width="1.6" marker-end="url(#arrc)"/>
+<rect x="505.0" y="419.0" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="522.0" y="430.0" font-size="10.5" font-weight="700" fill="#FF7A45" text-anchor="middle">1:N</text>
+<path d="M672,310.96 L672,392 L672,505 L710,537.0" fill="none" stroke="#FF7A45" stroke-width="1.6" marker-end="url(#arrc)"/>
+<rect x="655" y="421" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="672" y="432" font-size="10.5" font-weight="700" fill="#FF7A45" text-anchor="middle">N:N</text>
+<path d="M1010,233.0 L1072,242.5" fill="none" stroke="#F2545B" stroke-width="1.6" marker-end="url(#arrv)"/>
+<rect x="1028" y="161" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1045" y="172" font-size="10.5" font-weight="700" fill="#F2545B" text-anchor="middle">N:N</text>
+<path d="M672,136 L1228,92 L1228.0,118" fill="none" stroke="#F2545B" stroke-width="1.6" marker-end="url(#arrv)"/>
+<rect x="941" y="83" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="958" y="94" font-size="10.5" font-weight="700" fill="#F2545B" text-anchor="middle">N:N</text>
+<path d="M1010,537.0 L1020,490 L1072,353" fill="none" stroke="#F2545B" stroke-width="1.6" marker-end="url(#arrv)"/>
+<rect x="1001" y="461" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1018" y="472" font-size="10.5" font-weight="700" fill="#F2545B" text-anchor="middle">N:N  affecte</text>
+<path d="M1384,242.5 L1430,204.5" fill="none" stroke="#E0A53B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="1390.0" y="214.5" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1407.0" y="225.5" font-size="10.5" font-weight="700" fill="#E0A53B" text-anchor="middle">1:1</text>
+<path d="M1384,297.28 L1408,360 L1430,458.0" fill="none" stroke="#E0A53B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="1379.0" y="319.64" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1396.0" y="330.64" font-size="10.5" font-weight="700" fill="#E0A53B" text-anchor="middle">1:1</text>
+<path d="M1228.0,367 L1228.0,460" fill="none" stroke="#E0A53B" stroke-width="1.6" marker-end="url(#arr)"/>
+<rect x="1211.0" y="404.5" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1228.0" y="415.5" font-size="10.5" font-weight="700" fill="#E0A53B" text-anchor="middle">score</text>
+<path d="M700,837.5 L662,838.5" fill="none" stroke="#2DD4BF" stroke-width="1.6" marker-end="url(#arrk)"/>
+<rect x="664.0" y="829.0" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="681.0" y="840.0" font-size="10.5" font-weight="700" fill="#2DD4BF" text-anchor="middle">N:1</text>
+<path d="M1000,837.5 L1040,838.5" fill="none" stroke="#2DD4BF" stroke-width="1.6" marker-end="url(#arrk)"/>
+<rect x="1003.0" y="829.0" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="1020.0" y="840.0" font-size="10.5" font-weight="700" fill="#2DD4BF" text-anchor="middle">N:1</text>
+<path d="M850.0,770 L825,748 L678,748 L678,300 L710,182.4" fill="none" stroke="#2DD4BF" stroke-width="1.6" marker-end="url(#arrk)"/>
+<rect x="661" y="511" width="34" height="15" rx="3" fill="#0E0F12"/>
+<text x="678" y="522" font-size="10.5" font-weight="700" fill="#2DD4BF" text-anchor="middle">1:N</text>
+<path d="M50,260 L40,300 L40,808 L700,891" fill="none" stroke="#2DD4BF" stroke-width="1.6" stroke-dasharray="5,4" marker-end="url(#arrk)"/>
+<rect x="1372" y="700" width="350" height="245" rx="10" fill="#1B1E24" stroke="#2A2E36"/>
+<text x="1386" y="724" font-size="12.5" font-weight="700" fill="#ECECEC">Légende</text>
+<circle cx="1392" cy="748" r="3.2" fill="#FF7A45"/>
+<text x="1406" y="752" font-size="11.5" fill="#ECECEC">clé / identifiant primaire</text>
+<text x="1386" y="776" font-size="11" fill="#8B919B">◇</text>
+<text x="1406" y="776" font-size="11.5" fill="#ECECEC">référence (FK)</text>
+<path d="M1386,798 L1416,798" stroke="#8B919B" stroke-width="1.6" marker-end="url(#arr)"/>
+<text x="1426" y="802" font-size="11.5" fill="#ECECEC">relation (cardinalité)</text>
+<text x="1386" y="828" font-size="11" fill="#8B919B">Couleur des liens = domaine :</text>
+<rect x="1388" y="839" width="22" height="4" rx="2" fill="#FF7A45"/>
+<text x="1418" y="848" font-size="11.5" fill="#ECECEC">inventaire</text>
+<rect x="1388" y="859" width="22" height="4" rx="2" fill="#F2545B"/>
+<text x="1418" y="868" font-size="11.5" fill="#ECECEC">vulnérabilité</text>
+<rect x="1388" y="879" width="22" height="4" rx="2" fill="#E0A53B"/>
+<text x="1418" y="888" font-size="11.5" fill="#ECECEC">scoring / RTI</text>
+<rect x="1388" y="899" width="22" height="4" rx="2" fill="#2DD4BF"/>
+<text x="1418" y="908" font-size="11.5" fill="#ECECEC">kubernetes</text>
+<rect x="346" y="960" width="1376" height="134" rx="10" fill="#FF7A45" fill-opacity="0.06" stroke="#FF7A45" stroke-opacity="0.45"/>
+<text x="364" y="984" font-size="13" font-weight="700" fill="#FF7A45">Différences clés vs RHACS (pour la correspondance d'objets / ETM)</text>
+<text x="364" y="1007" font-size="11.6" fill="#ECECEC">• Identité vuln = <tspan fill="#FF7A45" font-weight="700">QID</tspan> (1 QID → N CVE via cveids[]), pas la CVE comme nœud — dédup sur (imageSha, QID) + package dans result/software[].</text>
+<text x="364" y="1028" font-size="11.6" fill="#ECECEC">• Pas d'entité <tspan fill="#FF7A45">Deployment</tspan> de 1ʳᵉ classe : le contexte k8s vient de label[] (pod.name/namespace) + cluster{} + objets Pod/Namespace du Cluster Sensor.</text>
+<text x="364" y="1049" font-size="11.6" fill="#ECECEC">• Scoring <tspan fill="#FF7A45">QDS/TruRisk</tspan> + RTI threatIntel (publicExploit, activeAttacks, exploitKit, malware…) embarqués dans la vuln ≈ tes signaux GreyNoise/KEV/EPSS.</text>
+<text x="364" y="1070" font-size="11.6" fill="#ECECEC">• Unité d'inventaire = <tspan fill="#FF7A45">imageSha</tspan> / <tspan fill="#FF7A45">containerSha</tspan> scannés par un Sensor sur un Host — modèle host-centric, plus plat que le graphe RHACS.</text>
+<text x="40" y="1100" font-size="10.5" fill="#8B919B">Source : docs.qualys.com/en/cs/api (CS 1.3x–1.42). Champs résumés à partir des réponses JSON réelles ; certains objets (malware, secrets, compliance) omis pour la lisibilité.</text>
+</svg>
