@@ -60,6 +60,39 @@ VM_TYPE_NORMALIZER = {
 }
 
 
+# resource.type (UI/Asset Inventory filter) -> api.name (RQL config search).
+# The UI "resource.type" attribute is NOT accepted by /search/config on every tenant,
+# so we translate it to api.name, which always is. Adjust/extend if a name differs on your tenant
+# (check Inventory > Assets > any asset > "API name").
+RESOURCE_TYPE_TO_API = {
+    "EC2 Instance": "aws-ec2-describe-instances",
+    "EC2 Classic Instance": "aws-ec2-describe-instances",         # EC2-Classic retired: same API, deduped
+    "ECS Container Instance": "aws-ecs-container-instance",
+    "Azure Virtual Machine": "azure-vm-list",
+    "Azure Container Instance": "azure-container-instances-container-group",
+    "Compute Instance": "gcloud-compute-instances-list",
+    "Compute Target Instance": "gcloud-compute-target-instance",
+}
+
+
+def build_api_rqls(resource_types: List[str], clouds: Optional[List[str]] = None) -> List[str]:
+    """One RQL per distinct api.name derived from the requested resource.type list."""
+    api_names: List[str] = []
+    for t in resource_types:
+        api = RESOURCE_TYPE_TO_API.get(t)
+        if not api:
+            print(f"[WARN] No api.name mapping for resource.type '{t}', skipped "
+                  f"(add it to RESOURCE_TYPE_TO_API)", file=sys.stderr)
+            continue
+        prefix = api.split("-", 1)[0]
+        cloud = {"aws": "aws", "azure": "azure", "gcloud": "gcp"}.get(prefix, "")
+        if clouds and cloud and cloud not in clouds:
+            continue
+        if api not in api_names:
+            api_names.append(api)
+    return [f"config from cloud.resource where api.name = '{a}'" for a in api_names]
+
+
 def build_vm_rql(resource_types: List[str], clouds: Optional[List[str]] = None) -> str:
     types_sql = ", ".join(f"'{t}'" for t in resource_types)
     rql = f"config from cloud.resource where resource.type IN ( {types_sql} )"
@@ -160,6 +193,10 @@ class PrismaCloudClient:
             f"{self.api_url}/search/config", json=payload,
             headers=self._headers(), timeout=DEFAULT_TIMEOUT,
         )
+        if resp.status_code == 400:
+            print(f"[ERROR] /search/config 400 for RQL: {query}\n        "
+                  f"x-redlock-status={resp.headers.get('x-redlock-status')} body={resp.text[:500]}",
+                  file=sys.stderr)
         resp.raise_for_status()
         data = resp.json().get("data", {})
         yield from data.get("items", [])
@@ -498,6 +535,9 @@ def main() -> None:
     parser.add_argument("--types", nargs="+", default=VM_RESOURCE_TYPES, metavar="RESOURCE_TYPE",
                         help="Prisma resource.type values to fetch "
                              "(default: the saved-search list, e.g. 'EC2 Instance' 'Azure Virtual Machine')")
+    parser.add_argument("--query-mode", choices=["api", "resource-type"], default="api",
+                        help="'api' (default): one RQL per api.name mapped from --types (works everywhere). "
+                             "'resource-type': single RQL on resource.type IN (...) (not accepted by all tenants).")
     parser.add_argument("--keep-no-ip", action="store_true",
                         help="Keep resources without any private/public IP (dropped by default)")
     parser.add_argument("--no-azure-enrich", action="store_true",
@@ -533,8 +573,10 @@ def main() -> None:
     # Build the list of (cloud_label, rql_query) to run
     if args.rql:
         queries = [("custom", args.rql)]
-    else:
+    elif args.query_mode == "resource-type":
         queries = [("vm", build_vm_rql(args.types, args.clouds))]
+    else:
+        queries = [("vm", q) for q in build_api_rqls(args.types, args.clouds)]
 
     azure_ips: Dict[str, Dict[str, str]] = {}
     if not args.no_azure_enrich and "azure" in args.clouds:
@@ -546,6 +588,7 @@ def main() -> None:
             print(f"[WARN] Azure enrichment failed: {exc}", file=sys.stderr)
 
     rows: List[Dict[str, Any]] = []
+    seen: set = set()
     for cloud, query in queries:
         print(f"[INFO] Querying {cloud.upper()}: {query}", file=sys.stderr)
         count = skipped = filtered = no_ip = 0
@@ -554,6 +597,10 @@ def main() -> None:
                 if item.get("deleted") and not args.include_deleted:
                     skipped += 1
                     continue
+                uid = item.get("rrn") or item.get("unifiedAssetId") or item.get("id")
+                if uid in seen:
+                    continue
+                seen.add(uid)
                 row = normalize_item(cloud, item, args.tag_keys)
                 azure_id = row.pop("_azure_id", "")
                 if azure_id and azure_id in azure_ips:
