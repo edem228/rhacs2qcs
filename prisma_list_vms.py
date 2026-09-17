@@ -2,8 +2,8 @@
 """
 prisma_list_vms.py
 ==================
-Lists cloud VM instances (AWS EC2, Azure VM, GCP Compute) from
-Prisma Cloud (CSPM) with an extended attribute set (tags, IPs, DNS, OS,
+Lists IP-bearing cloud compute resources (EC2, Azure VM, Azure Container Instance,
+GCP Compute, ...) from Prisma Cloud (CSPM) with an extended attribute set (tags, IPs, DNS, OS,
 VPC/subnet, security groups, etc.) designed for later ingestion
 into Qualys ETM via the Generic CSV connector.
 
@@ -19,8 +19,9 @@ Usage:
     python prisma_list_vms.py --format csv -o vms_etm.csv
     python prisma_list_vms.py --format csv -o vms.csv --tag-keys Environment Owner AppName
     python prisma_list_vms.py --clouds aws --state running --format json -o aws_running.json
+    python prisma_list_vms.py --types "EC2 Instance" "Azure Virtual Machine" --format csv -o vms.csv
     python prisma_list_vms.py --tag Environment=prod --region-filter eu-west
-    python prisma_list_vms.py --resource-type database --format csv -o dbs.csv
+    python prisma_list_vms.py --keep-no-ip --format csv -o all.csv   # also keep resources without IP
     python prisma_list_vms.py --rql "config from cloud.resource where api.name = 'aws-ec2-describe-instances' AND json.rule = state.name equals running"
 """
 
@@ -36,26 +37,41 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# RQL queries per resource type and per cloud provider.
-# Add new entries here to support more resource types over time.
-# Only "vm" has rich field normalization; other types use a generic mapping.
-RQL_QUERIES = {
-    "vm": {
-        "aws":   "config from cloud.resource where api.name = 'aws-ec2-describe-instances'",
-        "azure": "config from cloud.resource where api.name = 'azure-vm-list'",
-        "gcp":   "config from cloud.resource where api.name = 'gcloud-compute-instances-list'",
-    },
-    "database": {
-        "aws":   "config from cloud.resource where api.name = 'aws-rds-describe-db-instances'",
-        "azure": "config from cloud.resource where api.name = 'azure-sql-db-list'",
-        "gcp":   "config from cloud.resource where api.name = 'gcloud-sql-instances-list'",
-    },
-    "storage": {
-        "aws":   "config from cloud.resource where api.name = 'aws-s3api-get-bucket-acl'",
-        "azure": "config from cloud.resource where api.name = 'azure-storage-account-list'",
-        "gcp":   "config from cloud.resource where api.name = 'gcloud-storage-buckets-list'",
-    },
+# "vm" is fetched with ONE RQL query on resource.type, matching the Prisma Cloud
+# saved search filter {"resource.type": [...]}. Override the list with --types.
+VM_RESOURCE_TYPES = [
+    "EC2 Instance",
+    "Azure Container Instance",
+    "Compute Target Instance",
+    "EC2 Classic Instance",
+    "ECS Container Instance",
+    "Azure Virtual Machine",
+]
+
+# resource.type -> normalizer key ("aws"/"azure"/"gcp" = rich VM mapping, "generic" = fallback)
+VM_TYPE_NORMALIZER = {
+    "EC2 Instance": "aws",
+    "EC2 Classic Instance": "aws",
+    "Azure Virtual Machine": "azure",
+    "Compute Instance": "gcp",
+    "Azure Container Instance": "aci",
+    "ECS Container Instance": "generic",
+    "Compute Target Instance": "generic",
 }
+
+
+def build_vm_rql(resource_types: List[str], clouds: Optional[List[str]] = None) -> str:
+    types_sql = ", ".join(f"'{t}'" for t in resource_types)
+    rql = f"config from cloud.resource where resource.type IN ( {types_sql} )"
+    if clouds and set(clouds) != {"aws", "azure", "gcp"}:
+        clouds_sql = ", ".join(f"'{c}'" for c in clouds)
+        rql += f" AND cloud.type IN ( {clouds_sql} )"
+    return rql
+
+
+# Azure enrichment queries (VM payloads carry no IP: NIC + Public IP objects are joined client-side)
+AZURE_NIC_RQL = "config from cloud.resource where api.name = 'azure-network-nic-list'"
+AZURE_PIP_RQL = "config from cloud.resource where api.name = 'azure-network-public-ip-address-list'"
 
 DEFAULT_TIMEOUT = 60
 PAGE_LIMIT = 1000
@@ -64,6 +80,7 @@ TOKEN_TTL_SECONDS = 480  # JWT lives ~10 min; refresh at 8 min
 # Fixed CSV schema (stable columns = stable ETM transform map)
 CSV_COLUMNS = [
     "cloud_provider",        # aws | azure | gcp
+    "resource_type",         # Prisma resource.type (EC2 Instance, Azure Virtual Machine, ...)
     "asset_name",            # resource name as seen by Prisma
     "hostname",              # computerName / hostname / short privateDnsName
     "fqdn",                  # full private DNS name when available
@@ -254,6 +271,7 @@ def normalize_azure(item: Dict[str, Any]) -> Dict[str, Any]:
         "launch_time": _azure_prop(d, "timeCreated"),
         "network_tags": "",
         "tags": tags,
+        "_azure_id": (d.get("id", "") or "").lower(),  # join key for NIC enrichment
     }
 
 
@@ -297,7 +315,74 @@ def normalize_gcp(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-NORMALIZERS = {"aws": normalize_aws, "azure": normalize_azure, "gcp": normalize_gcp}
+def normalize_aci(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Azure Container Instance: IP lives in properties.ipAddress.ip (public or private)."""
+    d = item.get("data", {}) or {}
+    ip_block = _azure_prop(d, "ipAddress") or {}
+    ip = _get_nested(ip_block, "ip")
+    is_public = (_get_nested(ip_block, "type") or "").lower() == "public"
+    return {
+        "instance_id": d.get("id", "") or item.get("id", ""),
+        "hostname": d.get("name", "") or item.get("name", ""),
+        "fqdn": _get_nested(ip_block, "fqdn"),
+        "state": _azure_prop(d, "instanceView", "state") or _azure_prop(d, "provisioningState"),
+        "instance_type": _azure_prop(d, "sku"),
+        "os": _azure_prop(d, "osType"),
+        "platform_details": "|".join(c.get("name", "") for c in (_azure_prop(d, "containers") or [])),
+        "architecture": "",
+        "private_ip": "" if is_public else ip,
+        "public_ip": ip if is_public else "",
+        "private_dns": "", "public_dns": _get_nested(ip_block, "fqdn"),
+        "mac_address": "", "vpc_id": "",
+        "subnet_id": "|".join((sn.get("id", "") or "").rsplit("/", 1)[-1] for sn in (_azure_prop(d, "subnetIds") or [])),
+        "security_groups": "", "iam_profile": "",
+        "availability_zone": ",".join(d.get("zones") or []),
+        "launch_time": "", "network_tags": "",
+        "tags": d.get("tags") or {},
+    }
+
+
+NORMALIZERS = {"aws": normalize_aws, "azure": normalize_azure, "gcp": normalize_gcp, "aci": normalize_aci}
+
+
+# ---------------------------------------------------------------------------
+# Azure enrichment (NIC / Public IP join)
+# ---------------------------------------------------------------------------
+def build_azure_ip_index(client: "PrismaCloudClient") -> Dict[str, Dict[str, str]]:
+    """Returns {vm_resource_id(lower): {private_ip, public_ip, subnet_id, security_groups, mac_address}}
+    by joining azure-network-nic-list with azure-network-public-ip-address-list."""
+    pips: Dict[str, str] = {}
+    for item in client.search_config(AZURE_PIP_RQL):
+        d = item.get("data", {}) or {}
+        pips[(d.get("id", "") or "").lower()] = _azure_prop(d, "ipAddress") or ""
+
+    index: Dict[str, Dict[str, str]] = {}
+    for item in client.search_config(AZURE_NIC_RQL):
+        d = item.get("data", {}) or {}
+        vm_id = (_get_nested(_azure_prop(d, "virtualMachine") or {}, "id") or "").lower()
+        if not vm_id:
+            continue
+        entry = index.setdefault(vm_id, {"private_ip": "", "public_ip": "", "subnet_id": "",
+                                         "security_groups": "", "mac_address": ""})
+        nsg = (_get_nested(_azure_prop(d, "networkSecurityGroup") or {}, "id") or "").rsplit("/", 1)[-1]
+        mac = _azure_prop(d, "macAddress") or ""
+        for cfg in _azure_prop(d, "ipConfigurations") or []:
+            props = cfg.get("properties", {}) or cfg
+            priv = props.get("privateIPAddress", "")
+            pip_id = (_get_nested(props, "publicIPAddress", "id") or "").lower()
+            pub = pips.get(pip_id, "")
+            sub = (_get_nested(props, "subnet", "id") or "").rsplit("/", 1)[-1]
+            if priv and priv not in entry["private_ip"].split("|"):
+                entry["private_ip"] = "|".join(filter(None, [entry["private_ip"], priv]))
+            if pub and pub not in entry["public_ip"].split("|"):
+                entry["public_ip"] = "|".join(filter(None, [entry["public_ip"], pub]))
+            if sub and sub not in entry["subnet_id"].split("|"):
+                entry["subnet_id"] = "|".join(filter(None, [entry["subnet_id"], sub]))
+        if nsg and nsg not in entry["security_groups"].split("|"):
+            entry["security_groups"] = "|".join(filter(None, [entry["security_groups"], nsg]))
+        if mac and not entry["mac_address"]:
+            entry["mac_address"] = mac
+    return index
 
 
 def normalize_generic(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -319,22 +404,23 @@ def normalize_generic(item: Dict[str, Any]) -> Dict[str, Any]:
         "tags": tags,
     })
     # Drop keys handled by normalize_item itself
-    for k in ("cloud_provider", "asset_name", "unified_asset_id", "account_id",
+    for k in ("cloud_provider", "resource_type", "asset_name", "unified_asset_id", "account_id",
               "account_name", "region", "deleted", "tags_json"):
         empty.pop(k, None)
     return empty
 
 
-def normalize_item(cloud: str, item: Dict[str, Any], tag_keys: List[str],
-                   resource_type: str = "vm") -> Dict[str, Any]:
-    if resource_type == "vm" and cloud in NORMALIZERS:
-        specific = NORMALIZERS[cloud](item)
-    else:
-        specific = normalize_generic(item)
+def normalize_item(cloud: str, item: Dict[str, Any], tag_keys: List[str]) -> Dict[str, Any]:
+    # The single resource.type query returns mixed clouds: trust the item's cloudType first.
+    cloud = (item.get("cloudType") or cloud or "").lower()
+    prisma_type = item.get("resourceType", "")
+    key = VM_TYPE_NORMALIZER.get(prisma_type, cloud)
+    specific = NORMALIZERS[key](item) if key in NORMALIZERS else normalize_generic(item)
     tags: Dict[str, str] = specific.pop("tags", {}) or {}
 
     row = {
         "cloud_provider": cloud,
+        "resource_type": prisma_type,
         "asset_name": item.get("name", ""),
         "unified_asset_id": item.get("rrn", "") or item.get("unifiedAssetId", "") or item.get("id", ""),
         "account_id": item.get("accountId", ""),
@@ -397,7 +483,7 @@ def write_csv(rows: List[Dict[str, Any]], path: str, tag_keys: List[str]) -> Non
 
 
 def print_table(rows: List[Dict[str, Any]]) -> None:
-    cols = ["cloud_provider", "asset_name", "instance_id", "account_name",
+    cols = ["cloud_provider", "resource_type", "asset_name", "instance_id", "account_name",
             "region", "state", "private_ip", "public_ip"]
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) if rows else len(c) for c in cols}
     header = "  ".join(c.ljust(widths[c]) for c in cols)
@@ -409,9 +495,14 @@ def print_table(rows: List[Dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Lists cloud resources from Prisma Cloud (extended attributes)")
-    parser.add_argument("--resource-type", choices=list(RQL_QUERIES), default="vm",
-                        help="Resource type to fetch (default: vm). Only 'vm' gets full field normalization.")
-    parser.add_argument("--rql", help="Custom RQL config query (overrides --resource-type/--clouds), "
+    parser.add_argument("--types", nargs="+", default=VM_RESOURCE_TYPES, metavar="RESOURCE_TYPE",
+                        help="Prisma resource.type values to fetch "
+                             "(default: the saved-search list, e.g. 'EC2 Instance' 'Azure Virtual Machine')")
+    parser.add_argument("--keep-no-ip", action="store_true",
+                        help="Keep resources without any private/public IP (dropped by default)")
+    parser.add_argument("--no-azure-enrich", action="store_true",
+                        help="Skip the Azure NIC/Public-IP join (faster, but Azure VMs will have no IP)")
+    parser.add_argument("--rql", help="Custom RQL config query (overrides --types/--clouds), "
                                       "e.g.: \"config from cloud.resource where api.name = 'aws-ec2-describe-instances' "
                                       "AND json.rule = state.name equals running\"")
     parser.add_argument("--clouds", nargs="+", choices=["aws", "azure", "gcp"], default=["aws", "azure", "gcp"])
@@ -443,18 +534,33 @@ def main() -> None:
     if args.rql:
         queries = [("custom", args.rql)]
     else:
-        queries = [(cloud, RQL_QUERIES[args.resource_type][cloud]) for cloud in args.clouds]
+        queries = [("vm", build_vm_rql(args.types, args.clouds))]
+
+    azure_ips: Dict[str, Dict[str, str]] = {}
+    if not args.no_azure_enrich and "azure" in args.clouds:
+        print("[INFO] Building Azure NIC / Public IP index…", file=sys.stderr)
+        try:
+            azure_ips = build_azure_ip_index(client)
+            print(f"[INFO] Azure index: {len(azure_ips)} VMs with NIC data", file=sys.stderr)
+        except requests.HTTPError as exc:
+            print(f"[WARN] Azure enrichment failed: {exc}", file=sys.stderr)
 
     rows: List[Dict[str, Any]] = []
     for cloud, query in queries:
         print(f"[INFO] Querying {cloud.upper()}: {query}", file=sys.stderr)
-        count = skipped = filtered = 0
+        count = skipped = filtered = no_ip = 0
         try:
             for item in client.search_config(query):
                 if item.get("deleted") and not args.include_deleted:
                     skipped += 1
                     continue
-                row = normalize_item(cloud, item, args.tag_keys, args.resource_type)
+                row = normalize_item(cloud, item, args.tag_keys)
+                azure_id = row.pop("_azure_id", "")
+                if azure_id and azure_id in azure_ips:
+                    row.update({k: v for k, v in azure_ips[azure_id].items() if v})
+                if not args.keep_no_ip and not (row.get("private_ip") or row.get("public_ip")):
+                    no_ip += 1
+                    continue
                 if not matches_filters(row, args):
                     filtered += 1
                     continue
@@ -463,7 +569,7 @@ def main() -> None:
         except requests.HTTPError as exc:
             print(f"[WARN] {cloud} query failed: {exc}", file=sys.stderr)
             continue
-        print(f"[INFO] {cloud.upper()}: {count} kept, {filtered} filtered out, {skipped} deleted skipped",
+        print(f"[INFO] {cloud.upper()}: {count} kept, {no_ip} without IP, {filtered} filtered out, {skipped} deleted skipped",
               file=sys.stderr)
 
     if args.format == "json":
