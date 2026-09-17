@@ -188,6 +188,7 @@ class PrismaCloudClient:
             "query": query,
             "limit": PAGE_LIMIT,
             "timeRange": {"type": "to_now", "value": "epoch"},
+            "withResourceJson": True,
         }
         resp = self.session.post(
             f"{self.api_url}/search/config", json=payload,
@@ -238,6 +239,8 @@ def _azure_prop(data: Dict[str, Any], *path: str) -> Any:
     sub = data.get(flat_key)
     if isinstance(sub, dict):
         return _get_nested(sub, *path[1:]) if len(path) > 1 else sub
+    if sub not in (None, "") and len(path) == 1:
+        return sub  # flattened scalar or list (e.g. "['properties.macAddress']", "['properties.ipConfigurations']")
     return ""
 
 
@@ -308,7 +311,8 @@ def normalize_azure(item: Dict[str, Any]) -> Dict[str, Any]:
         "launch_time": _azure_prop(d, "timeCreated"),
         "network_tags": "",
         "tags": tags,
-        "_azure_id": (d.get("id", "") or "").lower(),  # join key for NIC enrichment
+        "_azure_ids": [d.get("id", ""), item.get("id", ""), item.get("rrn", "")],  # join keys
+        "_azure_data": d,
     }
 
 
@@ -385,40 +389,88 @@ NORMALIZERS = {"aws": normalize_aws, "azure": normalize_azure, "gcp": normalize_
 # ---------------------------------------------------------------------------
 # Azure enrichment (NIC / Public IP join)
 # ---------------------------------------------------------------------------
-def build_azure_ip_index(client: "PrismaCloudClient") -> Dict[str, Dict[str, str]]:
-    """Returns {vm_resource_id(lower): {private_ip, public_ip, subnet_id, security_groups, mac_address}}
-    by joining azure-network-nic-list with azure-network-public-ip-address-list."""
+def _ipconf_prop(cfg: Dict[str, Any], *path: str) -> Any:
+    """ipConfiguration entry: nested ARM ('properties': {...}) or Prisma-flattened keys."""
+    props = cfg.get("properties")
+    if isinstance(props, dict):
+        val = _get_nested(props, *path)
+        if val:
+            return val
+    return _get_nested(cfg, *path) or _azure_prop(cfg, *path)
+
+
+def _last(seg: str) -> str:
+    return (seg or "").rsplit("/", 1)[-1]
+
+
+def _merge(entry: Dict[str, str], key: str, val: str) -> None:
+    if val and val not in entry[key].split("|"):
+        entry[key] = "|".join(filter(None, [entry[key], val]))
+
+
+class AzureIpIndex:
+    """Two lookups built from azure-network-nic-list (+ public IPs):
+    by_vm  : vm ARM id (lower) -> net info   (uses the NIC's virtualMachine backref)
+    by_nic : nic ARM id (lower) -> net info  (used with the VM's networkProfile.networkInterfaces)"""
+
+    def __init__(self) -> None:
+        self.by_vm: Dict[str, Dict[str, str]] = {}
+        self.by_nic: Dict[str, Dict[str, str]] = {}
+        self.raw_sample: Optional[Dict[str, Any]] = None
+
+    @staticmethod
+    def _empty() -> Dict[str, str]:
+        return {"private_ip": "", "public_ip": "", "subnet_id": "", "security_groups": "", "mac_address": ""}
+
+    def lookup(self, vm_item_data: Dict[str, Any], vm_ids: List[str]) -> Dict[str, str]:
+        for vid in vm_ids:
+            if vid and vid.lower() in self.by_vm:
+                return self.by_vm[vid.lower()]
+        # canonical direction: VM -> networkProfile.networkInterfaces[].id
+        merged = self._empty()
+        found = False
+        for nic in _azure_prop(vm_item_data, "networkProfile", "networkInterfaces") or []:
+            nic_id = (nic.get("id", "") if isinstance(nic, dict) else str(nic)).lower()
+            info = self.by_nic.get(nic_id)
+            if info:
+                found = True
+                for k, v in info.items():
+                    for part in v.split("|"):
+                        _merge(merged, k, part)
+        return merged if found else {}
+
+    def __len__(self) -> int:
+        return len(self.by_nic)
+
+
+def build_azure_ip_index(client: "PrismaCloudClient") -> AzureIpIndex:
     pips: Dict[str, str] = {}
     for item in client.search_config(AZURE_PIP_RQL):
         d = item.get("data", {}) or {}
-        pips[(d.get("id", "") or "").lower()] = _azure_prop(d, "ipAddress") or ""
+        pips[(d.get("id", "") or item.get("id", "") or "").lower()] = _azure_prop(d, "ipAddress") or ""
 
-    index: Dict[str, Dict[str, str]] = {}
+    index = AzureIpIndex()
     for item in client.search_config(AZURE_NIC_RQL):
         d = item.get("data", {}) or {}
-        vm_id = (_get_nested(_azure_prop(d, "virtualMachine") or {}, "id") or "").lower()
-        if not vm_id:
-            continue
-        entry = index.setdefault(vm_id, {"private_ip": "", "public_ip": "", "subnet_id": "",
-                                         "security_groups": "", "mac_address": ""})
-        nsg = (_get_nested(_azure_prop(d, "networkSecurityGroup") or {}, "id") or "").rsplit("/", 1)[-1]
-        mac = _azure_prop(d, "macAddress") or ""
+        if index.raw_sample is None:
+            index.raw_sample = item
+        nic_id = (d.get("id", "") or item.get("id", "") or "").lower()
+        entry = index._empty()
         for cfg in _azure_prop(d, "ipConfigurations") or []:
-            props = cfg.get("properties", {}) or cfg
-            priv = props.get("privateIPAddress", "")
-            pip_id = (_get_nested(props, "publicIPAddress", "id") or "").lower()
-            pub = pips.get(pip_id, "")
-            sub = (_get_nested(props, "subnet", "id") or "").rsplit("/", 1)[-1]
-            if priv and priv not in entry["private_ip"].split("|"):
-                entry["private_ip"] = "|".join(filter(None, [entry["private_ip"], priv]))
-            if pub and pub not in entry["public_ip"].split("|"):
-                entry["public_ip"] = "|".join(filter(None, [entry["public_ip"], pub]))
-            if sub and sub not in entry["subnet_id"].split("|"):
-                entry["subnet_id"] = "|".join(filter(None, [entry["subnet_id"], sub]))
-        if nsg and nsg not in entry["security_groups"].split("|"):
-            entry["security_groups"] = "|".join(filter(None, [entry["security_groups"], nsg]))
-        if mac and not entry["mac_address"]:
-            entry["mac_address"] = mac
+            _merge(entry, "private_ip", _ipconf_prop(cfg, "privateIPAddress") or "")
+            pip_id = (_get_nested(_ipconf_prop(cfg, "publicIPAddress") or {}, "id") or "").lower()
+            _merge(entry, "public_ip", pips.get(pip_id, ""))
+            _merge(entry, "subnet_id", _last(_get_nested(_ipconf_prop(cfg, "subnet") or {}, "id") or ""))
+        _merge(entry, "security_groups", _last(_get_nested(_azure_prop(d, "networkSecurityGroup") or {}, "id") or ""))
+        entry["mac_address"] = _azure_prop(d, "macAddress") or ""
+        if nic_id:
+            index.by_nic[nic_id] = entry
+        vm_id = (_get_nested(_azure_prop(d, "virtualMachine") or {}, "id") or "").lower()
+        if vm_id:
+            vm_entry = index.by_vm.setdefault(vm_id, index._empty())
+            for k, v in entry.items():
+                for part in v.split("|"):
+                    _merge(vm_entry, k, part)
     return index
 
 
@@ -540,6 +592,8 @@ def main() -> None:
                              "'resource-type': single RQL on resource.type IN (...) (not accepted by all tenants).")
     parser.add_argument("--keep-no-ip", action="store_true",
                         help="Keep resources without any private/public IP (dropped by default)")
+    parser.add_argument("--debug-azure", action="store_true",
+                        help="Dump one raw NIC item and every unmatched Azure VM (stderr) to debug the IP join")
     parser.add_argument("--no-azure-enrich", action="store_true",
                         help="Skip the Azure NIC/Public-IP join (faster, but Azure VMs will have no IP)")
     parser.add_argument("--rql", help="Custom RQL config query (overrides --types/--clouds), "
@@ -578,12 +632,14 @@ def main() -> None:
     else:
         queries = [("vm", q) for q in build_api_rqls(args.types, args.clouds)]
 
-    azure_ips: Dict[str, Dict[str, str]] = {}
+    azure_ips: Optional[AzureIpIndex] = None
     if not args.no_azure_enrich and "azure" in args.clouds:
         print("[INFO] Building Azure NIC / Public IP index…", file=sys.stderr)
         try:
             azure_ips = build_azure_ip_index(client)
-            print(f"[INFO] Azure index: {len(azure_ips)} VMs with NIC data", file=sys.stderr)
+            print(f"[INFO] Azure index: {len(azure_ips)} NICs, {len(azure_ips.by_vm)} with VM backref", file=sys.stderr)
+            if args.debug_azure and azure_ips.raw_sample:
+                print("[DEBUG] sample NIC item:\n" + json.dumps(azure_ips.raw_sample, indent=1)[:3000], file=sys.stderr)
         except requests.HTTPError as exc:
             print(f"[WARN] Azure enrichment failed: {exc}", file=sys.stderr)
 
@@ -602,9 +658,15 @@ def main() -> None:
                     continue
                 seen.add(uid)
                 row = normalize_item(cloud, item, args.tag_keys)
-                azure_id = row.pop("_azure_id", "")
-                if azure_id and azure_id in azure_ips:
-                    row.update({k: v for k, v in azure_ips[azure_id].items() if v})
+                az_ids = row.pop("_azure_ids", None)
+                az_data = row.pop("_azure_data", None)
+                if az_ids is not None and azure_ips is not None:
+                    net = azure_ips.lookup(az_data or {}, az_ids)
+                    row.update({k: v for k, v in net.items() if v})
+                    if not net and args.debug_azure:
+                        print("[DEBUG] no NIC match for VM ids " + str(az_ids) +
+                              "\n        networkProfile=" + json.dumps(_azure_prop(az_data or {}, "networkProfile"))[:600],
+                              file=sys.stderr)
                 if not args.keep_no_ip and not (row.get("private_ip") or row.get("public_ip")):
                     no_ip += 1
                     continue
