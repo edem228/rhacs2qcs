@@ -21,7 +21,8 @@ Usage:
     python prisma_list_vms.py --clouds aws --state running --format json -o aws_running.json
     python prisma_list_vms.py --types "EC2 Instance" "Azure Virtual Machine" --format csv -o vms.csv
     python prisma_list_vms.py --tag Environment=prod --region-filter eu-west
-    python prisma_list_vms.py --keep-no-ip --format csv -o all.csv   # also keep resources without IP
+    python prisma_list_vms.py --drop-no-ip --exclude-deleted -o scannable.csv   # only live assets with an IP
+    # Default output keeps everything; triage on the ip_status column: OK / NO_IP / DELETED / DELETED_NO_IP
     python prisma_list_vms.py --rql "config from cloud.resource where api.name = 'aws-ec2-describe-instances' AND json.rule = state.name equals running"
 """
 
@@ -111,7 +112,7 @@ def build_vm_rql(resource_types: List[str], clouds: Optional[List[str]] = None) 
 
 # Azure enrichment queries (VM payloads carry no IP: NIC + Public IP objects are joined client-side)
 AZURE_NIC_RQL = "config from cloud.resource where api.name = 'azure-network-nic-list'"
-AZURE_PIP_RQL = "config from cloud.resource where api.name = 'azure-network-public-ip-address-list'"
+AZURE_PIP_RQL = "config from cloud.resource where api.name = 'azure-network-public-ip-address'"
 
 DEFAULT_TIMEOUT = 60
 PAGE_LIMIT = 1000
@@ -135,7 +136,8 @@ CSV_COLUMNS = [
     "os",                    # OS family (Linux/Windows or osType)
     "platform_details",
     "architecture",
-    "private_ip",            # primary reconciliation anchor (+ instance_id)
+    "ip_status",             # OK | NO_IP | DELETED | DELETED_NO_IP  (coverage triage)
+    "private_ip",            # primary reconciliation anchor (+ instance_id); "<NO_IP>" when none
     "public_ip",             # exposure signal (layer 1)
     "private_dns",
     "public_dns",
@@ -291,8 +293,33 @@ def normalize_aws(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _azure_vm_embedded_net(d: Dict[str, Any]) -> Dict[str, str]:
+    """Prisma enriches azure-vm-list with networkProfile.networkInterfaces[*].ipConfigurations[*]
+    (privateIpAddress / publicIpAddress / subnetId / networkSecurityGroupId). Read them first."""
+    out = {"private_ip": "", "public_ip": "", "subnet_id": "", "security_groups": "", "mac_address": ""}
+    for nic in _azure_prop(d, "networkProfile", "networkInterfaces") or []:
+        if not isinstance(nic, dict):
+            continue
+        _merge(out, "security_groups", _last(_get_nested(nic, "networkSecurityGroupId") or
+                                             _get_nested(nic, "networkSecurityGroup", "id") or ""))
+        _merge(out, "mac_address", _get_nested(nic, "macAddress") or "")
+        cfgs = nic.get("ipConfigurations") or nic.get("['properties.ipConfigurations']") or []
+        for cfg in cfgs:
+            if not isinstance(cfg, dict):
+                continue
+            _merge(out, "private_ip", _ipconf_prop(cfg, "privateIpAddress") or _ipconf_prop(cfg, "privateIPAddress") or "")
+            pub = _ipconf_prop(cfg, "publicIpAddress") or _ipconf_prop(cfg, "publicIPAddress") or ""
+            if isinstance(pub, dict):  # sometimes an object {id, ipAddress}
+                pub = pub.get("ipAddress") or pub.get("properties", {}).get("ipAddress") or ""
+            _merge(out, "public_ip", str(pub) if pub and "/" not in str(pub) else "")
+            _merge(out, "subnet_id", _last(_ipconf_prop(cfg, "subnetId") or
+                                           _get_nested(_ipconf_prop(cfg, "subnet") or {}, "id") or ""))
+    return out
+
+
 def normalize_azure(item: Dict[str, Any]) -> Dict[str, Any]:
     d = item.get("data", {}) or {}
+    net = _azure_vm_embedded_net(d)
     tags = d.get("tags") or {}
     os_type = _azure_prop(d, "storageProfile", "osDisk", "osType")
     computer_name = _azure_prop(d, "osProfile", "computerName")
@@ -306,14 +333,14 @@ def normalize_azure(item: Dict[str, Any]) -> Dict[str, Any]:
         "os": os_type,
         "platform_details": _get_nested(_azure_prop(d, "storageProfile", "imageReference") or {}, "offer"),
         "architecture": "",
-        "private_ip": "",   # requires azure-network-nic-list for reliable data (RQL join possible)
-        "public_ip": "",
+        "private_ip": net["private_ip"],   # requires azure-network-nic-list for reliable data (RQL join possible)
+        "public_ip": net["public_ip"],
         "private_dns": "",
         "public_dns": "",
-        "mac_address": "",
+        "mac_address": net["mac_address"],
         "vpc_id": "",
-        "subnet_id": "",
-        "security_groups": "",
+        "subnet_id": net["subnet_id"],
+        "security_groups": net["security_groups"],
         "iam_profile": "",
         "availability_zone": ",".join(d.get("zones") or []),
         "launch_time": _azure_prop(d, "timeCreated"),
@@ -453,12 +480,21 @@ class AzureIpIndex:
 
 def build_azure_ip_index(client: "PrismaCloudClient") -> AzureIpIndex:
     pips: Dict[str, str] = {}
-    for item in client.search_config(AZURE_PIP_RQL):
-        d = item.get("data", {}) or {}
-        pips[(d.get("id", "") or item.get("id", "") or "").lower()] = _azure_prop(d, "ipAddress") or ""
+    try:
+        for item in client.search_config(AZURE_PIP_RQL):
+            d = item.get("data", {}) or {}
+            pips[(d.get("id", "") or item.get("id", "") or "").lower()] = _azure_prop(d, "ipAddress") or ""
+    except requests.HTTPError as exc:
+        print(f"[WARN] Azure public IP query failed ({exc}); public IPs will come from the VM payload only",
+              file=sys.stderr)
 
     index = AzureIpIndex()
-    for item in client.search_config(AZURE_NIC_RQL):
+    nic_items: List[Dict[str, Any]] = []
+    try:
+        nic_items = list(client.search_config(AZURE_NIC_RQL))
+    except requests.HTTPError as exc:
+        print(f"[WARN] Azure NIC query failed ({exc}); relying on the VM payload only", file=sys.stderr)
+    for item in nic_items:
         d = item.get("data", {}) or {}
         if index.raw_sample is None:
             index.raw_sample = item
@@ -501,7 +537,7 @@ def normalize_generic(item: Dict[str, Any]) -> Dict[str, Any]:
         "tags": tags,
     })
     # Drop keys handled by normalize_item itself
-    for k in ("cloud_provider", "resource_type", "asset_name", "unified_asset_id", "account_id",
+    for k in ("cloud_provider", "resource_type", "ip_status", "asset_name", "unified_asset_id", "account_id",
               "account_name", "region", "deleted", "tags_json"):
         empty.pop(k, None)
     return empty
@@ -581,7 +617,7 @@ def write_csv(rows: List[Dict[str, Any]], path: str, tag_keys: List[str]) -> Non
 
 def print_table(rows: List[Dict[str, Any]]) -> None:
     cols = ["cloud_provider", "resource_type", "asset_name", "instance_id", "account_name",
-            "region", "state", "private_ip", "public_ip"]
+            "region", "state", "ip_status", "private_ip", "public_ip"]
     widths = {c: max(len(c), *(len(str(r.get(c, ""))) for r in rows)) if rows else len(c) for c in cols}
     header = "  ".join(c.ljust(widths[c]) for c in cols)
     print(header)
@@ -598,8 +634,8 @@ def main() -> None:
     parser.add_argument("--query-mode", choices=["api", "resource-type"], default="api",
                         help="'api' (default): one RQL per api.name mapped from --types (works everywhere). "
                              "'resource-type': single RQL on resource.type IN (...) (not accepted by all tenants).")
-    parser.add_argument("--keep-no-ip", action="store_true",
-                        help="Keep resources without any private/public IP (dropped by default)")
+    parser.add_argument("--drop-no-ip", action="store_true",
+                        help="Drop resources without any private/public IP (kept and tagged NO_IP by default)")
     parser.add_argument("--debug-azure", action="store_true",
                         help="Dump one raw NIC item and every unmatched Azure VM (stderr) to debug the IP join")
     parser.add_argument("--no-azure-enrich", action="store_true",
@@ -619,8 +655,8 @@ def main() -> None:
     parser.add_argument("-o", "--output", help="Output file (required for csv)")
     parser.add_argument("--tag-keys", nargs="*", default=[],
                         help="Tags to promote as dedicated columns, e.g.: --tag-keys Environment Owner AppName")
-    parser.add_argument("--include-deleted", action="store_true",
-                        help="Include assets flagged as deleted by Prisma (excluded by default)")
+    parser.add_argument("--exclude-deleted", action="store_true",
+                        help="Drop assets flagged as deleted by Prisma (kept and tagged DELETED by default)")
     args = parser.parse_args()
 
     api_url = os.environ.get("PRISMA_API_URL")
@@ -655,11 +691,12 @@ def main() -> None:
     seen: set = set()
     for cloud, query in queries:
         print(f"[INFO] Querying {cloud.upper()}: {query}", file=sys.stderr)
-        count = skipped = filtered = no_ip = raw = 0
+        count = skipped = filtered = no_ip = raw = deleted = 0
         try:
             for item in client.search_config(query):
                 raw += 1
-                if item.get("deleted") and not args.include_deleted:
+                is_deleted = bool(item.get("deleted"))
+                if is_deleted and args.exclude_deleted:
                     skipped += 1
                     continue
                 uid = item.get("rrn") or item.get("unifiedAssetId") or item.get("id")
@@ -676,9 +713,16 @@ def main() -> None:
                         print("[DEBUG] no NIC match for VM ids " + str(az_ids) +
                               "\n        networkProfile=" + json.dumps(_azure_prop(az_data or {}, "networkProfile"))[:600],
                               file=sys.stderr)
-                if not args.keep_no_ip and not (row.get("private_ip") or row.get("public_ip")):
+                has_ip = bool(row.get("private_ip") or row.get("public_ip"))
+                if not has_ip:
                     no_ip += 1
-                    continue
+                    if args.drop_no_ip:
+                        continue
+                    row["private_ip"] = "<NO_IP>"
+                row["ip_status"] = ("DELETED_" if is_deleted else "") + ("OK" if has_ip else "NO_IP")
+                row["ip_status"] = row["ip_status"].replace("DELETED_OK", "DELETED")
+                if is_deleted:
+                    deleted += 1
                 if not matches_filters(row, args):
                     filtered += 1
                     continue
@@ -687,8 +731,8 @@ def main() -> None:
         except requests.HTTPError as exc:
             print(f"[WARN] {cloud} query failed: {exc}", file=sys.stderr)
             continue
-        print(f"[INFO] {query}\n       {raw} returned by Prisma -> {count} kept, {no_ip} without IP, "
-              f"{filtered} filtered out, {skipped} deleted skipped",
+        print(f"[INFO] {query}\n       {raw} returned by Prisma -> {count} kept (incl. {no_ip} NO_IP, {deleted} DELETED), "
+              f"{filtered} filtered out, {skipped} deleted dropped",
               file=sys.stderr)
 
     if args.format == "json":
