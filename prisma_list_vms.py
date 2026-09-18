@@ -37,15 +37,18 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# "vm" is fetched with ONE RQL query on resource.type, matching the Prisma Cloud
-# saved search filter {"resource.type": [...]}. Override the list with --types.
+# Default scope = compute hosts with a NIC (scannable / agentable -> relevant for ETM coverage).
+# Deliberately excluded from the default:
+#   - "ECS Container Instance"  : it IS the EC2 host, already covered -> duplicates
+#   - "EC2 Classic Instance"    : EC2-Classic retired (2022), always empty
+#   - "Compute Target Instance" : GCP routing object, not a host, no IP
+#   - "Azure Container Instance": has an IP but no scannable OS; add it via --types if you
+#                                 measure network exposure rather than scan/agent coverage
+# Override with --types.
 VM_RESOURCE_TYPES = [
     "EC2 Instance",
-    "Azure Container Instance",
-    "Compute Target Instance",
-    "EC2 Classic Instance",
-    "ECS Container Instance",
     "Azure Virtual Machine",
+    "Compute Instance",              # GCP VMs
 ]
 
 # resource.type -> normalizer key ("aws"/"azure"/"gcp" = rich VM mapping, "generic" = fallback)
@@ -53,6 +56,7 @@ VM_TYPE_NORMALIZER = {
     "EC2 Instance": "aws",
     "EC2 Classic Instance": "aws",
     "Azure Virtual Machine": "azure",
+    "Azure Virtual Machine Scale Set VM": "azure",
     "Compute Instance": "gcp",
     "Azure Container Instance": "aci",
     "ECS Container Instance": "generic",
@@ -72,6 +76,9 @@ RESOURCE_TYPE_TO_API = {
     "Azure Container Instance": "azure-container-instances-container-group",
     "Compute Instance": "gcloud-compute-instances-list",
     "Compute Target Instance": "gcloud-compute-target-instance",
+    # Azure VM Scale Set instances are NOT returned by azure-vm-list.
+    # Verify the exact api.name on your tenant (Inventory > Assets > a VMSS VM > "API name").
+    "Azure Virtual Machine Scale Set VM": "azure-vmss-vm-list",
 }
 
 
@@ -211,6 +218,7 @@ class PrismaCloudClient:
             )
             resp.raise_for_status()
             page = resp.json()
+            page = page.get("data", page) if isinstance(page.get("data"), dict) else page
             yield from page.get("items", [])
             next_token = page.get("nextPageToken")
 
@@ -647,9 +655,10 @@ def main() -> None:
     seen: set = set()
     for cloud, query in queries:
         print(f"[INFO] Querying {cloud.upper()}: {query}", file=sys.stderr)
-        count = skipped = filtered = no_ip = 0
+        count = skipped = filtered = no_ip = raw = 0
         try:
             for item in client.search_config(query):
+                raw += 1
                 if item.get("deleted") and not args.include_deleted:
                     skipped += 1
                     continue
@@ -678,7 +687,8 @@ def main() -> None:
         except requests.HTTPError as exc:
             print(f"[WARN] {cloud} query failed: {exc}", file=sys.stderr)
             continue
-        print(f"[INFO] {cloud.upper()}: {count} kept, {no_ip} without IP, {filtered} filtered out, {skipped} deleted skipped",
+        print(f"[INFO] {query}\n       {raw} returned by Prisma -> {count} kept, {no_ip} without IP, "
+              f"{filtered} filtered out, {skipped} deleted skipped",
               file=sys.stderr)
 
     if args.format == "json":
