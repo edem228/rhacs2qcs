@@ -32,7 +32,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Tuple, Any, Dict, Iterator, List, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -99,6 +99,33 @@ def build_api_rqls(resource_types: List[str], clouds: Optional[List[str]] = None
         if api not in api_names:
             api_names.append(api)
     return [f"config from cloud.resource where api.name = '{a}'" for a in api_names]
+
+
+# Prisma Cloud config search silently caps a single RQL at 100 000 results, even with pagination.
+# If a query hits that number, it MUST be split (per account by default) and results merged.
+PRISMA_HARD_CAP = 100_000
+
+
+def partition_queries(client: "PrismaCloudClient", queries: List[Tuple[str, str]],
+                      mode: str, clouds: List[str]) -> List[Tuple[str, str]]:
+    """Split each RQL into one RQL per cloud account (mode='account') so no sub-query reaches the cap."""
+    if mode == "none":
+        return queries
+    accounts = [a for a in client.list_accounts()
+                if a.get("enabled", True) and (a.get("cloudType", "") or "").lower() in clouds]
+    out: List[Tuple[str, str]] = []
+    for label, rql in queries:
+        prefix = rql.split("api.name = '", 1)[-1].split("-", 1)[0]
+        cloud = {"aws": "aws", "azure": "azure", "gcloud": "gcp"}.get(prefix, "")
+        for acc in accounts:
+            if cloud and (acc.get("cloudType", "") or "").lower() != cloud:
+                continue
+            name = (acc.get("name", "") or "").replace("'", "\\'")
+            out.append((f"{label}:{acc.get('name', '')}", f"{rql} AND cloud.account = '{name}'"))
+    if not out:  # no account matched -> keep original queries rather than returning nothing
+        return queries
+    print(f"[INFO] Partitioned into {len(out)} per-account queries", file=sys.stderr)
+    return out
 
 
 def build_vm_rql(resource_types: List[str], clouds: Optional[List[str]] = None) -> str:
@@ -190,6 +217,40 @@ class PrismaCloudClient:
         if self._token is None or (time.time() - self._token_acquired_at) > TOKEN_TTL_SECONDS:
             self.login()
         return {"Content-Type": "application/json", "x-redlock-auth": self._token}  # type: ignore[dict-item]
+
+    def list_accounts(self) -> List[Dict[str, Any]]:
+        """GET /cloud -> onboarded cloud accounts (accountId, name, cloudType, enabled)."""
+        resp = self.session.get(f"{self.api_url}/cloud", headers=self._headers(), timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_inventory_filters(self) -> List[Dict[str, Any]]:
+        """GET /filter/v2/inventory -> the exact filter names/options the ETM 'Filter' JSON field can use."""
+        resp = self.session.get(f"{self.api_url}/filter/v2/inventory", headers=self._headers(),
+                                timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        return resp.json()
+
+    def scan_info(self, etm_filter: Dict[str, Any], limit: int = 1000) -> Iterator[Dict[str, Any]]:
+        """POST /v2/resource/scan_info with the same JSON filter ETM uses -> what the connector will import."""
+        filters = [{"name": k, "operator": "=", "value": v}
+                   for k, vals in etm_filter.items() for v in (vals if isinstance(vals, list) else [vals])]
+        payload: Dict[str, Any] = {"filters": filters, "limit": limit,
+                                   "timeRange": {"type": "to_now", "value": "epoch"}}
+        token: Optional[str] = None
+        while True:
+            if token:
+                payload["pageToken"] = token
+            resp = self.session.post(f"{self.api_url}/v2/resource/scan_info", json=payload,
+                                     headers=self._headers(), timeout=DEFAULT_TIMEOUT)
+            if resp.status_code == 400:
+                print(f"[ERROR] /v2/resource/scan_info 400: {resp.text[:500]}", file=sys.stderr)
+            resp.raise_for_status()
+            body = resp.json()
+            yield from body.get("resources", body.get("items", []))
+            token = body.get("nextPageToken")
+            if not token:
+                return
 
     def search_config(self, query: str) -> Iterator[Dict[str, Any]]:
         """Runs an RQL config query and iterates over all items (full pagination)."""
@@ -631,6 +692,16 @@ def main() -> None:
     parser.add_argument("--types", nargs="+", default=VM_RESOURCE_TYPES, metavar="RESOURCE_TYPE",
                         help="Prisma resource.type values to fetch "
                              "(default: the saved-search list, e.g. 'EC2 Instance' 'Azure Virtual Machine')")
+    parser.add_argument("--list-inventory-filters", action="store_true",
+                        help="Print the Prisma inventory filter names/options usable in the ETM connector "
+                             "'Filter' JSON field, then exit")
+    parser.add_argument("--simulate-etm-filter", metavar="JSON",
+                        help="JSON filter exactly as configured in the ETM connector (e.g. "
+                             "'{\"resource.type\":[\"EC2 Instance\"]}'): replays it against "
+                             "/v2/resource/scan_info and reports what ETM will import (deleted / no-IP), then exit")
+    parser.add_argument("--partition-by", choices=["none", "account"], default="account",
+                        help="Split each RQL per cloud account to stay under Prisma's 100k-results cap "
+                             "(default: account; use 'none' on small tenants)")
     parser.add_argument("--query-mode", choices=["api", "resource-type"], default="api",
                         help="'api' (default): one RQL per api.name mapped from --types (works everywhere). "
                              "'resource-type': single RQL on resource.type IN (...) (not accepted by all tenants).")
@@ -669,12 +740,48 @@ def main() -> None:
     client.login()
 
     # Build the list of (cloud_label, rql_query) to run
+    if args.list_inventory_filters:
+        for f in client.list_inventory_filters():
+            opts = f.get("options") or []
+            print(f"{f.get('name')}  [{f.get('type', '')}]  " +
+                  (", ".join(map(str, opts[:15])) + (" ..." if len(opts) > 15 else "") if opts else ""))
+        return
+
+    if args.simulate_etm_filter:
+        etm_filter = json.loads(args.simulate_etm_filter)
+        stats: Dict[str, Dict[str, int]] = {}
+        for r in client.scan_info(etm_filter):
+            key = f"{r.get('cloudType', '?')} / {r.get('resourceType', '?')}"
+            st = stats.setdefault(key, {"total": 0, "deleted": 0, "no_ip": 0})
+            st["total"] += 1
+            if r.get("deleted"):
+                st["deleted"] += 1
+            d = r.get("data") or {}
+            has_ip = bool(r.get("ip") or d.get("privateIpAddress")
+                          or _azure_vm_embedded_net(d)["private_ip"]
+                          or any(n.get("networkIP") for n in (d.get("networkInterfaces") or []) if isinstance(n, dict)))
+            if not has_ip:
+                st["no_ip"] += 1
+        print(f"{'cloud / resource.type':45} {'total':>8} {'deleted':>8} {'no_ip':>8}")
+        for key, st in sorted(stats.items()):
+            print(f"{key:45} {st['total']:>8} {st['deleted']:>8} {st['no_ip']:>8}")
+        tot = sum(st["total"] for st in stats.values())
+        print(f"\nETM would import {tot} assets with this filter "
+              f"(deleted: {sum(st['deleted'] for st in stats.values())}, "
+              f"no IP: {sum(st['no_ip'] for st in stats.values())})")
+        return
+
     if args.rql:
         queries = [("custom", args.rql)]
     elif args.query_mode == "resource-type":
         queries = [("vm", build_vm_rql(args.types, args.clouds))]
     else:
         queries = [("vm", q) for q in build_api_rqls(args.types, args.clouds)]
+    if not args.rql:
+        try:
+            queries = partition_queries(client, queries, args.partition_by, args.clouds)
+        except requests.HTTPError as exc:
+            print(f"[WARN] Could not list cloud accounts ({exc}); running unpartitioned queries", file=sys.stderr)
 
     azure_ips: Optional[AzureIpIndex] = None
     if not args.no_azure_enrich and "azure" in args.clouds:
@@ -731,6 +838,10 @@ def main() -> None:
         except requests.HTTPError as exc:
             print(f"[WARN] {cloud} query failed: {exc}", file=sys.stderr)
             continue
+        if raw >= PRISMA_HARD_CAP:
+            print(f"[WARN] {raw} results = Prisma hard cap reached, this query is TRUNCATED. "
+                  f"Split it further (per region: add \" AND cloud.region = '...'\" or narrow --types).",
+                  file=sys.stderr)
         print(f"[INFO] {query}\n       {raw} returned by Prisma -> {count} kept (incl. {no_ip} NO_IP, {deleted} DELETED), "
               f"{filtered} filtered out, {skipped} deleted dropped",
               file=sys.stderr)
