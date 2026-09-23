@@ -224,12 +224,21 @@ class PrismaCloudClient:
         resp.raise_for_status()
         return resp.json()
 
-    def list_inventory_filters(self) -> List[Dict[str, Any]]:
-        """GET /filter/v2/inventory -> the exact filter names/options the ETM 'Filter' JSON field can use."""
-        resp = self.session.get(f"{self.api_url}/filter/v2/inventory", headers=self._headers(),
-                                timeout=DEFAULT_TIMEOUT)
-        resp.raise_for_status()
-        return resp.json()
+    def list_inventory_filters(self) -> Dict[str, Any]:
+        """Filter vocabularies usable in the ETM connector 'Filter' JSON field.
+        - /filter/resource/scan_info/suggest : filters of /v2/resource/scan_info (the endpoint ETM calls)
+        - /filter/v2/inventory/suggest       : filters of the Asset Inventory (superset, for comparison)
+        Each returns {filter_name: {"options": [...], ...}}."""
+        out: Dict[str, Any] = {}
+        for label, path in (("scan_info", "/filter/resource/scan_info/suggest"),
+                            ("inventory", "/filter/v2/inventory/suggest")):
+            resp = self.session.get(f"{self.api_url}{path}", headers=self._headers(), timeout=DEFAULT_TIMEOUT)
+            if resp.status_code == 404:
+                print(f"[WARN] {path} -> 404 on this tenant, skipped", file=sys.stderr)
+                continue
+            resp.raise_for_status()
+            out[label] = resp.json()
+        return out
 
     def scan_info(self, etm_filter: Dict[str, Any], limit: int = 1000) -> Iterator[Dict[str, Any]]:
         """POST /v2/resource/scan_info with the same JSON filter ETM uses -> what the connector will import."""
@@ -741,10 +750,14 @@ def main() -> None:
 
     # Build the list of (cloud_label, rql_query) to run
     if args.list_inventory_filters:
-        for f in client.list_inventory_filters():
-            opts = f.get("options") or []
-            print(f"{f.get('name')}  [{f.get('type', '')}]  " +
-                  (", ".join(map(str, opts[:15])) + (" ..." if len(opts) > 15 else "") if opts else ""))
+        for label, body in client.list_inventory_filters().items():
+            print(f"\n=== {label} ===")
+            entries = body.items() if isinstance(body, dict) else ((f.get("name"), f) for f in body)
+            for name, spec in entries:
+                opts = spec.get("options", spec) if isinstance(spec, dict) else spec
+                opts = opts if isinstance(opts, list) else []
+                shown = ", ".join(map(str, opts[:15])) + (" ..." if len(opts) > 15 else "")
+                print(f"{name:40} {shown}")
         return
 
     if args.simulate_etm_filter:
