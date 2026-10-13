@@ -104,9 +104,23 @@ def to_canonical(row: dict, mapping: dict, kind: str) -> dict:
 
 
 def from_csv(path: str, mapping: dict, kind: str) -> Iterator[dict]:
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        for row in csv.DictReader(f):
-            yield to_canonical(row, mapping, kind)
+    """Read a CMDB export. Sniffs delimiter (, ; tab) and encoding (UTF-8/UTF-16, with BOM),
+    then checks the header against the mapping so a wrong file fails loudly, not silently."""
+    raw = open(path, "rb").read()
+    enc = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig"
+    text = raw.decode(enc, errors="replace")
+    delim = csv.Sniffer().sniff(text[:4096], delimiters=",;\t").delimiter
+    reader = csv.DictReader(text.splitlines(), delimiter=delim)
+    header = [h.strip() for h in reader.fieldnames or []]
+    reader.fieldnames = header
+    missing = sorted(set(mapping.values()) - set(header))
+    log.info("%s: %s | delimiter=%r encoding=%s | %d columns", kind, path, delim, enc, len(header))
+    if "sys_id" in missing or mapping["name"] in missing:
+        sys.exit(f"{path}: required columns missing {missing}\n  header seen: {header}")
+    if missing:
+        log.warning("%s: columns not found (left empty): %s", path, missing)
+    for row in reader:
+        yield to_canonical(row, mapping, kind)
 
 
 def from_api(query: str) -> Iterator[dict]:
